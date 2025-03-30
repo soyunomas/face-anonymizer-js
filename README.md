@@ -6,7 +6,7 @@ Una sencilla aplicación web para anonimizar caras en imágenes usando emojis. S
 <!-- === ¡IMPORTANTE! Actualiza esta sección === -->
 <!-- ====================================================== -->
 
-[![Captura de pantalla de Face Anonymizer JS](screenshot.png)](https://soyunomas.github.io/face-anonymizer-js/screenshot.png)
+[![Captura de pantalla de Face Anonymizer JS](screenshot.png)]
 <!-- 
   1. Haz una captura de pantalla atractiva de tu aplicación en funcionamiento.
   2. Guárdala como "screenshot.png" (o el nombre que prefieras) en la raíz de tu repositorio.
@@ -18,7 +18,7 @@ Una sencilla aplicación web para anonimizar caras en imágenes usando emojis. S
 
 Puedes probar la aplicación directamente en tu navegador aquí:
 
-[**>>> Acceder a la Demo en Vivo <<<**](https://soyunomas.github.io/GeminiGiftGenerator/index.html)
+[**>>> Acceder a la Demo en Vivo <<<**](https://soyunomas.github.io/face-anonymizer-js/index.html)
 
 <!-- 
   *   Para que este enlace funcione, necesitas desplegar tu proyecto, por ejemplo, usando GitHub Pages.
