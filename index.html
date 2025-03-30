@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anonimizador Selectivo Múltiple</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <!-- Estilos personalizados -->
+    <style>
+        body { padding-top: 20px; background-color: #f8f9fa; }
+        .container { max-width: 960px; }
+        #dropZone { border: 3px dashed #0d6efd; border-radius: 0.375rem; padding: 30px 20px; text-align: center; color: #6c757d; background-color: #e9ecef; transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out; margin-bottom: 1rem; cursor: pointer; }
+        #dropZone.drag-over { background-color: #cfe2ff; border-color: #0a58ca; }
+        #resultsContainer .card { transition: transform 0.2s ease-in-out; margin-bottom: 1rem; }
+        #resultsContainer .card:hover { transform: translateY(-5px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        #resultsContainer .card-img-top { width: 100%; height: 200px; object-fit: contain; background-color: #f8f9fa; border-bottom: 1px solid #dee2e6; }
+        #resultsContainer .card-body { padding: 0.75rem; text-align: center; }
+        #resultsContainer .card-title { font-size: 0.9rem; margin-bottom: 0.5rem; word-break: break-all; }
+        #tempCanvas, #selectionCanvas { display: none; }
+        footer { padding: 20px 0; }
+        .d-none { display: none !important; }
+        #emojiSelect { font-size: 1.5rem; max-width: 150px; }
+        .slider-container label { display: block; margin-bottom: 0.25rem; }
+        .slider-container span { font-weight: bold; color: #0d6efd; }
+        .controls-row > div { margin-bottom: 0.5rem; }
+        @media (min-width: 768px) { .controls-row { align-items: flex-end; } .controls-row > div { margin-bottom: 0; } }
+
+        #selectionCanvas { display: block; max-width: 100%; height: auto; cursor: pointer; background-color: #eee; margin: 0 auto; }
+        .modal-dialog-scrollable .modal-body { overflow-y: auto; }
+        .modal-lg { max-width: 90%; }
+         @media (min-width: 992px) { .modal-lg { max-width: 800px; } }
+
+         body.processing #dropZone { cursor: not-allowed; background-color: #f8f9fa; opacity: 0.7; }
+         body.processing #imageUpload { pointer-events: none; }
+    </style>
+    <!-- face-api.js -->
+    <script defer
+            src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"
+            integrity="sha256-XWbslTONf8w2XOFUgbhZm69LbiLJpiS3bUyoIaZpplk="
+            crossorigin="anonymous"></script>
+</head>
+<body > <!-- Clase 'processing' se añade/quita dinámicamente -->
+    <div class="container">
+        <header class="text-center mb-4">
+             <h1><span id="headerEmoji">🙂</span> Anonimizador Selectivo Múltiple</h1>
+             <p class="lead">Sube <strong>una o varias imágenes</strong>. Para cada una, podrás seleccionar qué caras anonimizar.<br> Ajusta el emoji, la sensibilidad y si quieres emojis aleatorios.<br> <strong>Procesamiento 100% local.</strong></p>
+        </header>
+
+        <div class="card">
+            <div class="card-body">
+                <!-- Zona de Carga -->
+                <div id="dropZone" title="Haz clic o arrastra imágenes aquí">
+                     <p class="m-0">📂 Arrastra imágenes aquí <br> o <br> 🖱️ Haz clic para seleccionar</p>
+                    <input type="file" id="imageUpload" accept="image/png, image/jpeg, image/jpg, image/webp" multiple style="display: none;">
+                </div>
+
+                 <!-- Controles -->
+                 <div class="row mt-3 g-3 controls-row">
+                     <div class="col-md-auto text-center">
+                        <label for="emojiSelect" class="form-label fw-bold mb-1">Emoji:</label>
+                        <select class="form-select d-inline-block w-auto" id="emojiSelect" aria-label="Selector de Emoji"></select>
+                    </div>
+                     <div class="col-md slider-container text-center px-md-3">
+                        <label for="confidenceSlider" class="form-label fw-bold mb-1">Confianza Mín. (<span id="confidenceValueDisplay">0.50</span>): <small>(más bajo = detecta más)</small></label>
+                        <input type="range" class="form-range w-100" id="confidenceSlider" min="0.1" max="0.9" step="0.05" value="0.5">
+                    </div>
+                    <div class="col-md-auto text-center">
+                        <div class="form-check form-switch form-check-inline mt-1">
+                            <input class="form-check-input" type="checkbox" role="switch" id="randomEmojiToggle">
+                            <label class="form-check-label fw-bold" for="randomEmojiToggle">Emojis Aleatorios</label>
+                        </div>
+                    </div>
+                 </div>
+
+                <!-- Mensajes -->
+                <div id="statusMessages" class="mt-3">
+                     <div id="loadingModelsIndicator" class="alert alert-info d-flex align-items-center d-none" role="alert"><div class="spinner-border spinner-border-sm me-2"></div>Cargando modelos...</div>
+                     <div id="progressMessage" class="alert alert-primary d-none" role="alert"></div>
+                     <div id="infoMessage" class="alert alert-secondary d-none" role="alert"></div>
+                     <div id="errorMessage" class="alert alert-danger d-none" role="alert"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resultados -->
+        <hr class="my-4">
+        <h2 class="text-center mb-3">Resultados Procesados</h2>
+        <div id="resultsContainer" class="row g-3 justify-content-center">
+            <div id="resultsPlaceholder" class="col-12 text-center text-muted fst-italic">Aquí aparecerán las imágenes procesadas...</div>
+        </div>
+
+        <!-- Canvas temporal -->
+        <canvas id="tempCanvas"></canvas>
+
+         <!-- Modal para Selección de Caras -->
+        <div class="modal fade" id="selectionModal" tabindex="-1" aria-labelledby="selectionModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="selectionModalLabel">Selecciona las Caras a Anonimizar</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <p id="modalInstructions">Haz clic sobre los recuadros azules para seleccionarlos (se pondrán verdes).</p>
+                        <canvas id="selectionCanvas"></canvas>
+                    </div>
+                    <div class="modal-footer justify-content-center">
+                        <button type="button" class="btn btn-secondary mx-1" data-bs-dismiss="modal">Cancelar / Saltar Imagen</button>
+                        <!-- *** BOTÓN MODIFICADO *** -->
+                        <button type="button" class="btn btn-info mx-1" id="markAllButton">Marcar Todas</button>
+                        <button type="button" class="btn btn-primary mx-1" id="anonymizeSelectedButton">Anonimizar Seleccionadas</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <footer class="text-center mt-5 text-muted"> <small>Desarrollado con HTML, Bootstrap, JavaScript y face-api.js</small> </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
+    <script>
+        console.log("--- Script principal iniciado (Multi-Imagen + Marcar Todas) ---");
+
+        // --- DOM Refs ---
+        const dropZone = document.getElementById('dropZone');
+        const imageUpload = document.getElementById('imageUpload');
+        const resultsContainer = document.getElementById('resultsContainer');
+        // Variable global para el placeholder, se asigna en DOMContentLoaded
+        let resultsPlaceholder = null;
+        const tempCanvas = document.getElementById('tempCanvas');
+        const loadingModelsIndicator = document.getElementById('loadingModelsIndicator');
+        const errorMessage = document.getElementById('errorMessage');
+        const infoMessage = document.getElementById('infoMessage');
+        const progressMessage = document.getElementById('progressMessage');
+        const emojiSelect = document.getElementById('emojiSelect');
+        const headerEmoji = document.getElementById('headerEmoji');
+        const confidenceSlider = document.getElementById('confidenceSlider');
+        const confidenceValueDisplay = document.getElementById('confidenceValueDisplay');
+        const randomEmojiToggle = document.getElementById('randomEmojiToggle');
+        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+
+        // Refs para selección
+        const selectionModalElement = document.getElementById('selectionModal');
+        const selectionCanvas = document.getElementById('selectionCanvas');
+        const selectionCtx = selectionCanvas.getContext('2d');
+        const anonymizeSelectedButton = document.getElementById('anonymizeSelectedButton');
+        const markAllButton = document.getElementById('markAllButton'); // *** Ref al botón "Marcar Todas" ***
+        const modalInstructions = document.getElementById('modalInstructions');
+        let selectionModal = null;
+
+        // --- Globals ---
+        const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+        const faceEmojis = ['🙂','😀','😄','😊','😎','🤔','😏','🥳','😂','🤣','🤩','😜','😇','🥸','😷','😵','🥴','🤯','🥺','😭','😱','🥶','🥵','😶','😐','😑','🙄','😬','😴','🤤','🤢','🤮','🤡','👻','👽','🤖','💩','🎃','👺','👹'];
+        let faceApiModelLoaded = false;
+        let currentConfidenceThreshold = 0.5;
+
+        // Estado para cola de procesamiento
+        let imageQueue = [];
+        let currentQueueIndex = -1;
+        let isProcessingQueue = false;
+
+        // Estado para selección actual
+        let currentImageForSelection = null;
+        let currentDetections = [];
+        let currentFileName = "";
+
+        // --- Funciones Auxiliares (sin cambios respecto a versión anterior) ---
+        function showElement(element, message = null) { if (!element) return; if (message !== null) element.textContent = message; element.classList.remove('d-none'); if (!element.classList.contains('d-flex') && !element.classList.contains('d-block')) { if (element.id === 'loadingModelsIndicator') element.classList.add('d-flex'); else element.classList.add('d-block'); } }
+        function hideElement(element) { if (!element) return; element.classList.add('d-none'); element.classList.remove('d-block', 'd-flex'); if (element.textContent) element.textContent = ''; }
+        function resetVisualUI(clearResults = true) {
+            hideElement(errorMessage); hideElement(infoMessage); hideElement(progressMessage);
+            if (clearResults) {
+                resultsContainer.innerHTML = '';
+                // Re-buscar o crear placeholder si es necesario
+                 let placeholder = document.getElementById('resultsPlaceholder');
+                 if (!placeholder) {
+                     placeholder = document.createElement('div');
+                     placeholder.id = 'resultsPlaceholder';
+                     placeholder.className = 'col-12 text-center text-muted fst-italic';
+                     resultsContainer.appendChild(placeholder);
+                 }
+                 placeholder.textContent = 'Aquí aparecerán las imágenes procesadas...';
+                 placeholder.classList.remove('d-none');
+                 resultsPlaceholder = placeholder; // Actualizar referencia global
+                console.log("UI resultados reseteada (con limpieza).");
+            } else { console.log("UI reseteada (sin limpiar resultados)."); }
+        }
+        function populateEmojiSelector() { if (!emojiSelect) return; faceEmojis.forEach((emoji, index) => { const option = document.createElement('option'); option.value = emoji; option.textContent = emoji; if (index === 0) { option.selected = true; if(headerEmoji) headerEmoji.textContent = emoji; } emojiSelect.appendChild(option); }); console.log("Selector Emojis populado."); emojiSelect.addEventListener('change', (event) => { if(headerEmoji) headerEmoji.textContent = event.target.value; }); }
+        async function loadModels() {
+            if (faceApiModelLoaded) return;
+            console.log("Cargando modelos..."); showElement(loadingModelsIndicator, "Cargando modelos..."); hideElement(infoMessage); hideElement(errorMessage);
+            try {
+                if (typeof faceapi === 'undefined') { await new Promise(resolve => setTimeout(resolve, 500)); if (typeof faceapi === 'undefined') throw new ReferenceError("faceapi no definido después de esperar"); }
+                console.log("Cargando desde:", MODEL_URL); const startTime = performance.now();
+                await Promise.all([ faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL), faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL) ]);
+                const endTime = performance.now(); console.log(`Modelos cargados en ${((endTime - startTime) / 1000).toFixed(2)} seg.`);
+                hideElement(loadingModelsIndicator); showElement(infoMessage, 'Modelos listos. Añade imágenes.'); faceApiModelLoaded = true;
+            } catch (error) {
+                console.error("Error cargando modelos:", error); hideElement(loadingModelsIndicator);
+                let errorMsg = `Error cargando modelos: ${error.message || error}`;
+                if (error instanceof ReferenceError) errorMsg += ". Asegúrate que el script face-api.min.js se cargó correctamente.";
+                else if (error instanceof Error && error.message.includes('fetch')) errorMsg += ". Verifica tu conexión a internet o si la URL de los modelos es accesible.";
+                showElement(errorMessage, errorMsg); faceApiModelLoaded = false;
+            }
+        }
+        function displayResult(result) {
+            console.log(`Añadiendo resultado: ${result.filename}`);
+            // Ocultar placeholder si existe y está visible
+             if (resultsPlaceholder) resultsPlaceholder.classList.add('d-none');
+            const colDiv = document.createElement('div'); colDiv.className = 'col-lg-4 col-md-6 col-sm-12 mb-3';
+            const cardDiv = document.createElement('div'); cardDiv.className = 'card h-100 shadow-sm';
+            const img = document.createElement('img'); img.className = 'card-img-top'; img.src = result.dataUrl; img.alt = `Imagen procesada ${result.filename}`;
+            const cardBody = document.createElement('div'); cardBody.className = 'card-body d-flex flex-column';
+            const title = document.createElement('p'); title.className = 'card-title flex-grow-1 small'; title.textContent = result.filename;
+            const downloadButton = document.createElement('button'); downloadButton.className = 'btn btn-sm btn-success mt-auto align-self-center';
+            downloadButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-download me-1" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>Descargar`;
+            downloadButton.addEventListener('click', () => { try { const link = document.createElement('a'); link.href = result.dataUrl; const baseName = result.filename.substring(0, result.filename.lastIndexOf('.')) || result.filename; const timestamp = new Date().toISOString().slice(0,19).replace(/[-:T]/g,''); link.download = `${baseName}_anon_${timestamp}.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); } catch (err) { console.error("Error descarga:", err); showElement(errorMessage, "No se pudo descargar."); } });
+            cardBody.appendChild(title); cardBody.appendChild(downloadButton); cardDiv.appendChild(img); cardDiv.appendChild(cardBody); colDiv.appendChild(cardDiv);
+            resultsContainer.appendChild(colDiv);
+        }
+        function drawSelectionCanvas() {
+             if (!currentImageForSelection || !selectionCanvas) { return; }
+             const imgWidth = currentImageForSelection.naturalWidth; const imgHeight = currentImageForSelection.naturalHeight;
+             selectionCanvas.width = imgWidth; selectionCanvas.height = imgHeight;
+             selectionCtx.clearRect(0, 0, imgWidth, imgHeight); selectionCtx.drawImage(currentImageForSelection, 0, 0, imgWidth, imgHeight);
+             selectionCtx.lineWidth = Math.max(2, Math.min(imgWidth, imgHeight) * 0.005); selectionCtx.font = `${Math.max(12, imgHeight * 0.04)}px Arial`;
+             selectionCtx.textAlign = 'center'; selectionCtx.textBaseline = 'middle';
+             currentDetections.forEach((item, index) => {
+                 const box = item.detection.box; selectionCtx.beginPath(); selectionCtx.strokeStyle = item.selected ? '#28a745' : '#0d6efd';
+                 selectionCtx.rect(box.x, box.y, box.width, box.height); selectionCtx.stroke();
+                 if (item.selected) {
+                     selectionCtx.fillStyle = 'rgba(40, 167, 69, 0.8)'; const checkSize = Math.min(box.width, box.height) * 0.3;
+                     selectionCtx.font = `${checkSize}px Arial`; selectionCtx.fillText('✔', box.x + box.width - checkSize*0.7 , box.y + checkSize*0.7);
+                 }
+             });
+        }
+        function handleSelectionCanvasClick(event) {
+            if (!currentDetections || currentDetections.length === 0) return;
+            const rect = selectionCanvas.getBoundingClientRect(); const scaleX = selectionCanvas.width / rect.width; const scaleY = selectionCanvas.height / rect.height;
+            const x = (event.clientX - rect.left) * scaleX; const y = (event.clientY - rect.top) * scaleY;
+            let clickedOnFace = false;
+            for (let i = currentDetections.length - 1; i >= 0; i--) {
+                 const item = currentDetections[i]; const box = item.detection.box;
+                 if (x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
+                     item.selected = !item.selected; clickedOnFace = true; break;
+                 }
+             }
+            if (clickedOnFace) { drawSelectionCanvas(); }
+        }
+        async function detectAndPrepareSelection(imageFile) {
+            console.log(`Detectando: ${imageFile.name}`); if (!faceApiModelLoaded) { showElement(errorMessage, "Modelos no listos."); isProcessingQueue = false; document.body.classList.remove('processing'); return; }
+            const progressText = `Detectando caras en Imagen ${currentQueueIndex + 1}/${imageQueue.length}: ${imageFile.name}...`;
+            showElement(progressMessage, progressText); hideElement(infoMessage); hideElement(errorMessage);
+            const image = new Image(); let objectURL = null;
+            try {
+                objectURL = URL.createObjectURL(imageFile); image.src = objectURL;
+                await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = (err) => reject(new Error(`No se pudo cargar ${imageFile.name}`)); });
+                currentImageForSelection = image; currentFileName = imageFile.name;
+                tempCanvas.width = image.naturalWidth; tempCanvas.height = image.naturalHeight; tempCtx.drawImage(image, 0, 0);
+                const detectionOptions = new faceapi.SsdMobilenetv1Options({ minConfidence: currentConfidenceThreshold });
+                const results = await faceapi.detectAllFaces(tempCanvas, detectionOptions).withFaceLandmarks();
+                console.log(`Detectados: ${results.length}`); tempCtx.clearRect(0,0,tempCanvas.width, tempCanvas.height);
+                currentDetections = results.map(r => ({ detection: r.detection, landmarks: r.landmarks, selected: false }));
+                hideElement(progressMessage);
+                if (currentDetections.length > 0) {
+                    drawSelectionCanvas();
+                    if (!selectionModal) { selectionModal = new bootstrap.Modal(selectionModalElement); }
+                    if (modalInstructions) { modalInstructions.textContent = `Imagen ${currentQueueIndex + 1}/${imageQueue.length}: ${currentFileName}. Haz clic o usa los botones.`; }
+                     // Habilitar/deshabilitar botones según si hay detecciones
+                     markAllButton.disabled = false;
+                     anonymizeSelectedButton.disabled = false;
+                    selectionModal.show();
+                } else {
+                    showElement(infoMessage, `No se encontraron caras en "${imageFile.name}". Saltando.`);
+                    cleanupAfterSelection(); setTimeout(startNextImageProcessing, 500);
+                }
+            } catch (error) {
+                console.error(`Error detectando ${imageFile.name}:`, error);
+                showElement(errorMessage, `Error procesando ${imageFile.name}: ${error.message || '?'}. Saltando.`);
+                cleanupAfterSelection(); setTimeout(startNextImageProcessing, 500);
+            }
+        }
+        async function anonymizeSelectedFaces() {
+             if (!currentImageForSelection || !currentDetections) { return; }
+             const selectedCount = currentDetections.filter(d => d.selected).length;
+             if (selectedCount === 0) {
+                 showElement(infoMessage, "No has seleccionado ninguna cara. Saltando imagen.");
+                 if (selectionModal) selectionModal.hide();
+                 return;
+             }
+             console.log(`Anonimizando ${selectedCount} caras...`);
+             const progressText = `Anonimizando Imagen ${currentQueueIndex + 1}/${imageQueue.length}: ${currentFileName}...`;
+             showElement(progressMessage, progressText); hideElement(infoMessage); hideElement(errorMessage);
+             // --- Lógica anonimización ---
+             tempCanvas.width = currentImageForSelection.naturalWidth; tempCanvas.height = currentImageForSelection.naturalHeight;
+             tempCtx.drawImage(currentImageForSelection, 0, 0);
+             const useRandom = randomEmojiToggle.checked; const selectedEmoji = emojiSelect.value;
+             tempCtx.textAlign = 'center'; tempCtx.textBaseline = 'middle';
+             currentDetections.forEach(item => {
+                 if (item.selected) {
+                     const { detection, landmarks } = item; const { x, y, width, height } = detection.box; let angleRad = 0;
+                     try {
+                         const lE = landmarks.getLeftEye(); const rE = landmarks.getRightEye();
+                         if (lE && lE.length > 0 && rE && rE.length > 0) {
+                            const lC = lE.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y }), { x: 0, y: 0 }); lC.x /= lE.length; lC.y /= lE.length;
+                            const rC = rE.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y }), { x: 0, y: 0 }); rC.x /= rE.length; rC.y /= rE.length;
+                            angleRad = Math.atan2(rC.y - lC.y, rC.x - lC.x);
+                         }
+                     } catch (e) { console.warn("Error ángulo:", e); }
+                     const emoji = useRandom ? faceEmojis[Math.floor(Math.random() * faceEmojis.length)] : selectedEmoji;
+                     const fontSize = height * 0.95; tempCtx.font = `${fontSize}px Arial`;
+                     const cX = x + width / 2; const cY = y + height / 2;
+                     tempCtx.save(); tempCtx.translate(cX, cY); tempCtx.rotate(angleRad); tempCtx.fillText(emoji, 0, 0); tempCtx.restore();
+                 }
+             });
+             const dataUrl = tempCanvas.toDataURL('image/png'); tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+             // --- Fin lógica anonimización ---
+             displayResult({ filename: currentFileName, dataUrl: dataUrl });
+             hideElement(progressMessage);
+             if (selectionModal) { selectionModal.hide(); }
+             else { cleanupAfterSelection(); startNextImageProcessing(); }
+        }
+        function cleanupAfterSelection() {
+             console.log("Limpiando selección actual.");
+             if (currentImageForSelection && currentImageForSelection.src && currentImageForSelection.src.startsWith('blob:')) { URL.revokeObjectURL(currentImageForSelection.src); console.log(`URL revocada.`); }
+             if (selectionCtx) { selectionCtx.clearRect(0, 0, selectionCanvas.width, selectionCanvas.height); }
+             currentImageForSelection = null; currentDetections = []; currentFileName = "";
+        }
+        function startNextImageProcessing() {
+            console.log("Intentando siguiente imagen..."); currentQueueIndex++;
+            if (currentQueueIndex < imageQueue.length) {
+                const nextFile = imageQueue[currentQueueIndex]; console.log(`Índice ${currentQueueIndex}: ${nextFile.name}`);
+                detectAndPrepareSelection(nextFile);
+            } else {
+                console.log("Cola finalizada."); showElement(infoMessage, `Proceso completado (${imageQueue.length} imágenes).`); hideElement(progressMessage);
+                imageQueue = []; currentQueueIndex = -1; isProcessingQueue = false; document.body.classList.remove('processing');
+            }
+        }
+        function handleFiles(files) {
+            console.log(`handleFiles: ${files.length}`); if (!faceApiModelLoaded) { showElement(errorMessage, "Modelos no cargados."); return; }
+            resetVisualUI(!isProcessingQueue); const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+            if (imageFiles.length > 0) {
+                imageQueue.push(...imageFiles); console.log(`${imageFiles.length} añadidas. Total: ${imageQueue.length}`);
+                showElement(infoMessage, `${imageFiles.length} añadidas. Total: ${imageQueue.length}.`); hideElement(errorMessage);
+                if (!isProcessingQueue) {
+                    isProcessingQueue = true; document.body.classList.add('processing'); currentQueueIndex = -1; startNextImageProcessing();
+                } else {
+                     if(currentQueueIndex >= 0 && currentQueueIndex < imageQueue.length) {
+                         showElement(progressMessage, `Procesando ${currentQueueIndex + 1}/${imageQueue.length}... (Cola actualizada)`);
+                     }
+                }
+            } else if (files.length > 0) { showElement(errorMessage, "Ningún archivo válido."); }
+            else { console.log("No se seleccionó archivo."); }
+            if (imageUpload) imageUpload.value = '';
+        }
+
+        // --- Event Listeners ---
+        dropZone.addEventListener('dragenter', (event) => { event.preventDefault(); if (!faceApiModelLoaded || isProcessingQueue) return; dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragover', (event) => { event.preventDefault(); });
+        dropZone.addEventListener('dragleave', (event) => { event.preventDefault(); dropZone.classList.remove('drag-over'); });
+        dropZone.addEventListener('drop', (event) => { event.preventDefault(); if (isProcessingQueue) { showElement(infoMessage, "Proceso en curso..."); return; } dropZone.classList.remove('drag-over'); handleFiles(event.dataTransfer.files); });
+        dropZone.addEventListener('click', () => { if (!faceApiModelLoaded) { showElement(errorMessage, "Modelos no cargados."); return; } if (isProcessingQueue) { showElement(infoMessage, "Proceso en curso..."); return; } imageUpload.click(); });
+        imageUpload.addEventListener('change', (event) => { handleFiles(event.target.files); });
+        confidenceSlider.addEventListener('input', (event) => { currentConfidenceThreshold = parseFloat(event.target.value); if (confidenceValueDisplay) { confidenceValueDisplay.textContent = currentConfidenceThreshold.toFixed(2); } });
+
+        // Listeners para selección
+        selectionCanvas.addEventListener('click', handleSelectionCanvasClick);
+        anonymizeSelectedButton.addEventListener('click', anonymizeSelectedFaces);
+
+        // *** Listener MODIFICADO para el botón "Marcar Todas" ***
+        markAllButton.addEventListener('click', () => {
+            console.log("Botón 'Marcar Todas' pulsado.");
+            if (!currentDetections || currentDetections.length === 0) {
+                console.warn("No hay detecciones para marcar.");
+                return; // No hacer nada si no hay caras
+            }
+            // Marcar todas las detecciones como seleccionadas
+            currentDetections.forEach(item => item.selected = true);
+            console.log("Todas las caras marcadas como seleccionadas.");
+            // Actualizar visualmente el canvas para reflejar la selección
+            drawSelectionCanvas();
+            // NO llamar a anonymizeSelectedFaces() aquí
+            // NO cerrar el modal aquí
+        });
+
+        selectionModalElement.addEventListener('hidden.bs.modal', () => {
+            console.log("Modal cerrado.");
+            cleanupAfterSelection();
+            setTimeout(startNextImageProcessing, 50); // Avanzar a la siguiente
+        });
+
+        // --- Inicialización ---
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("DOMContentLoaded.");
+            // Asignar referencia al placeholder globalmente
+            resultsPlaceholder = document.getElementById('resultsPlaceholder');
+            populateEmojiSelector();
+            hideElement(infoMessage); hideElement(errorMessage); hideElement(progressMessage);
+            if(resultsPlaceholder) resultsPlaceholder.classList.remove('d-none'); else resetVisualUI(true);
+            if (confidenceValueDisplay) confidenceValueDisplay.textContent = currentConfidenceThreshold.toFixed(2);
+            if (confidenceSlider) confidenceSlider.value = currentConfidenceThreshold;
+            setTimeout(loadModels, 100);
+        });
+
+        console.log("--- Script principal parseado (Multi-Imagen + Marcar Todas) ---");
+    </script>
+</body>
+</html>
