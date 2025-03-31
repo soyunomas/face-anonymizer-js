@@ -1,5 +1,6 @@
 # Face Anonymizer JS
-
+[![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/soyunomas/face-anonymizer-js/blob/main/LICENSE)
+[![Demo](https://img.shields.io/badge/Demo-Live-brightgreen)](https://soyunomas.github.io/face-anonymizer-js/index.html)
 Una sencilla aplicación web para anonimizar caras en imágenes usando emojis. Sube tus fotos, selecciona las caras que quieres cubrir y descarga el resultado. ¡Todo el procesamiento se realiza localmente en tu navegador para máxima privacidad!
 
 ![Captura de pantalla de Face Anonymizer JS](screenshot.png)
